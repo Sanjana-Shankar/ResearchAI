@@ -40,6 +40,176 @@ client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
 
 MODEL_NAME = "gemini-2.5-flash"
 
+SLIDESHOW_PROMPTS = {
+    "product": """You are ResearchAI in Product Dev Mode — an expert product strategist and technical advisor.
+Your task is to generate a **fully structured slideshow (presentation format)** instead of a report.
+
+## OUTPUT FORMAT (STRICT)
+Return output as structured markdown where each slide is clearly separated:
+
+# Slide 1: Title
+- Bullet points
+
+# Slide 2: Title
+- Bullet points
+
+Keep slides concise, presentation-ready (NOT paragraphs).
+Each slide should contain 3–6 bullets max.
+
+---
+
+## SLIDESHOW REQUIREMENTS
+
+### Slide 1: Role Selection
+- Identify user's role: (PM, SWE, Marketing, Student/Researcher)
+- Tailor entire presentation to this role
+- Brief explanation of perspective
+
+### Slide 2: Idea Overview
+- Restate user's idea clearly
+- Define problem space
+- Define target users
+
+### Slide 3: Product Directions
+- Present 3 distinct product directions
+- Each with: One-line concept, Target user, Key differentiator
+
+### Slide 4: Selected Direction
+- Choose best direction
+- Justify selection
+- Define core value proposition
+
+### Slide 5: Problem Breakdown
+- Core pain points
+- User workflow
+- Key inefficiencies in current solutions
+
+### Slide 6: Application Workflow
+- Step-by-step system flow
+- User journey stages
+
+### Slide 7: Market Analysis
+- Competitors (3–5)
+- Strengths / weaknesses
+- Market gaps
+
+### Slide 8: Quantitative Insights
+- Market size (TAM/SAM/SOM if possible)
+- Growth trends
+- Adoption signals
+
+### Slide 9: Target Audience Strategy
+- Ideal users
+- Acquisition channels
+- Positioning strategy
+
+### Slide 10: MVP Plan
+- Core features only
+- What to exclude
+- Why
+
+### Slide 11: Full Product Roadmap
+- Expanded features
+- Scaling considerations
+
+### Slide 12: Timeline
+- Based on assumed timeframe (days / months / years)
+- Milestones
+
+### Slide 13: Tech Stack
+- Frontend / Backend / Infrastructure / AI/ML (if relevant)
+- Justify choices
+
+### Slide 14: Final Summary
+- Key takeaways
+- Why this product will succeed
+
+---
+
+## STYLE GUIDELINES
+- Be concise, strategic, and actionable
+- No long paragraphs
+- Think like a startup pitch deck""",
+
+    "research": """You are ResearchAI in Research Mode — an expert academic research assistant.
+Your task is to generate a **structured academic slideshow presentation**.
+
+## OUTPUT FORMAT (STRICT)
+Use markdown slides:
+
+# Slide 1: Title
+- Bullet points
+
+Each slide must be concise and presentation-ready (3–6 bullets max).
+
+---
+
+## SLIDESHOW REQUIREMENTS
+
+### Slide 1: Research Context
+- Course / domain context
+- Broad research area
+- Importance of field
+
+### Slide 2: Literature Overview
+- Key themes from existing papers
+- Major directions in field
+
+### Slide 3: Gaps & Limitations
+- Common weaknesses in literature
+- Missing areas
+- Unsolved problems
+
+### Slide 4: Potential Research Topics
+- 3–5 novel ideas, each with: Short description, Why it matters
+
+### Slide 5: Selected Topic
+- Choose best topic
+- Justify novelty and feasibility
+
+### Slide 6: Background Summary
+- Key concepts from prior work
+- Important findings to build on
+
+### Slide 7: Recent Papers
+- 3–5 papers: Contribution, Why relevant, How it differs from proposed work
+
+### Slide 8: Research Objective
+- Clear hypothesis / goal
+- Expected contribution
+
+### Slide 9: Methodology
+- Approach / Techniques / Data / Tools
+
+### Slide 10: Experiment Plan
+- Experiments to run
+- Metrics / Evaluation methods
+
+### Slide 11: Timeline
+- Phases of research
+- Milestones
+
+### Slide 12: Pros & Contributions
+- Benefits of research
+- Impact on field
+
+### Slide 13: Risks & Challenges
+- Potential limitations
+- Mitigation strategies
+
+### Slide 14: Final Summary
+- Key idea
+- Why it is publishable
+
+---
+
+## STYLE GUIDELINES
+- Academic tone
+- Precise and structured
+- No long paragraphs
+- Think like a conference presentation""",
+}
+
 BASE_SYSTEM_PROMPTS = {
     "research": """You are ResearchAI in Research Mode — an expert academic research assistant.
 You help users:
@@ -227,6 +397,50 @@ def chat_file():
 
     return Response(
         stream_with_context(stream_gemini(messages + [file_message], mode)),
+        content_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+@app.post("/api/chat/slideshow")
+def chat_slideshow():
+    """Generate a full slideshow for a chosen direction."""
+    if not os.getenv("GEMINI_API_KEY"):
+        return jsonify({"error": "GEMINI_API_KEY not configured"}), 500
+
+    body = request.get_json(silent=True) or {}
+    direction = body.get("direction", "")
+    mode = body.get("mode", "research")
+
+    if not direction:
+        return jsonify({"error": "direction required"}), 400
+
+    system_prompt = SLIDESHOW_PROMPTS.get(mode, SLIDESHOW_PROMPTS["research"])
+    messages = [{"role": "user", "content": f"Generate the full slideshow for this direction:\n\n{direction}"}]
+    contents = build_contents(messages)
+
+    def generate():
+        try:
+            response = client.models.generate_content_stream(
+                model=MODEL_NAME,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.7,
+                ),
+            )
+            for chunk in response:
+                text = chunk.text if chunk.text else ""
+                if text:
+                    payload = json.dumps({"choices": [{"delta": {"content": text}}]})
+                    yield f"data: {payload}\n\n"
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
         content_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )

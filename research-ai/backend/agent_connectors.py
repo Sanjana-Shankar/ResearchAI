@@ -18,6 +18,7 @@ CLIENT_ID          = os.getenv("AIRBYTE_CLIENT_ID", "")
 CLIENT_SECRET      = os.getenv("AIRBYTE_CLIENT_SECRET", "")
 SLACK_CONNECTOR_ID = os.getenv("AIRBYTE_SLACK_CONNECTOR_ID", "")
 DRIVE_CONNECTOR_ID = os.getenv("AIRBYTE_DRIVE_CONNECTOR_ID", "")
+SLACK_BOT_TOKEN    = os.getenv("SLACK_BOT_TOKEN", "")
 
 _token_cache: dict = {"token": None, "expires_at": 0.0}
 
@@ -80,6 +81,48 @@ def list_slack_channels() -> list[dict]:
         return []
 
 
+def _extract_slack_file(file: dict) -> str:
+    """Download a file attached to a Slack message and extract its text."""
+    url = file.get("url_private_download") or file.get("url_private", "")
+    mimetype = file.get("mimetype", "")
+    name = file.get("name", "")
+    size = file.get("size", 0)
+
+    if not url or not SLACK_BOT_TOKEN:
+        return ""
+    # Skip very large files (>15MB)
+    if size > 15 * 1024 * 1024:
+        print(f"[Slack] skipping large file {name} ({size} bytes)")
+        return ""
+
+    try:
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.content
+
+        if mimetype == "application/pdf" or name.lower().endswith(".pdf"):
+            try:
+                import PyPDF2
+                reader = PyPDF2.PdfReader(io.BytesIO(data))
+                text = "\n".join(p.extract_text() or "" for p in reader.pages)
+                return f"[File: {name}]\n{text[:4000]}"
+            except Exception as e:
+                print(f"[Slack] PDF parse error {name}: {e}")
+                return ""
+
+        if mimetype.startswith("text/") or name.lower().endswith((".txt", ".md", ".csv")):
+            return f"[File: {name}]\n{data.decode('utf-8', errors='replace')[:4000]}"
+
+        return ""
+    except Exception as e:
+        print(f"[Slack] file download error {name}: {e}")
+        return ""
+
+
 def get_slack_context(channel_ids: list[str] | None = None, limit: int = 40) -> str:
     if not SLACK_CONNECTOR_ID:
         return ""
@@ -89,7 +132,7 @@ def get_slack_context(channel_ids: list[str] | None = None, limit: int = 40) -> 
     if not channel_ids:
         return ""
 
-    lines: list[str] = []
+    parts: list[str] = []
     for ch_id in channel_ids:
         try:
             result = _execute(SLACK_CONNECTOR_ID, "channel_messages", "list", {
@@ -98,11 +141,18 @@ def get_slack_context(channel_ids: list[str] | None = None, limit: int = 40) -> 
             })
             for m in _records(result):
                 text = (m.get("text") or "").strip()
+                # Include non-system text messages
                 if text and not text.startswith("<") and len(text) > 5:
-                    lines.append(text)
+                    parts.append(text)
+                # Extract text from attached files
+                for f in m.get("files", []):
+                    file_text = _extract_slack_file(f)
+                    if file_text:
+                        parts.append(file_text)
         except Exception as e:
             print(f"[Slack] messages error ({ch_id}): {e}")
-    return "\n".join(lines)
+
+    return "\n\n".join(parts)
 
 
 # ── Google Drive ──────────────────────────────────────────────────────────────
