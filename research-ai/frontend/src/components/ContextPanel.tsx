@@ -11,7 +11,6 @@ interface ContextPanelProps {
 
 export default function ContextPanel({ mode, onSuggest, accentBtn }: ContextPanelProps) {
   const [open, setOpen] = useState(false)
-  const [idea, setIdea] = useState('')
   const btnRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -86,9 +85,8 @@ export default function ContextPanel({ mode, onSuggest, accentBtn }: ContextPane
   const handleGenerate = () => {
     if (!canGenerate) return
     const sources = [...(slackOn ? ['slack'] : []), ...(driveOn ? ['drive'] : [])]
-    onSuggest(idea.trim(), sources, Array.from(selChannels), Array.from(selFolders))
+    onSuggest('', sources, Array.from(selChannels), Array.from(selFolders))
     setOpen(false)
-    setIdea('')
   }
 
   const panel = open ? createPortal(
@@ -187,13 +185,6 @@ export default function ContextPanel({ mode, onSuggest, accentBtn }: ContextPane
 
       <hr className="border-white/10" />
 
-      <input
-        value={idea}
-        onChange={e => setIdea(e.target.value)}
-        placeholder="Seed idea (optional)…"
-        className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-slate-200 placeholder-slate-600 outline-none focus:ring-1 focus:ring-white/20"
-      />
-
       <button
         type="button"
         onClick={handleGenerate}
@@ -218,13 +209,17 @@ export default function ContextPanel({ mode, onSuggest, accentBtn }: ContextPane
         ref={btnRef}
         type="button"
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200 transition-colors px-2.5 py-1.5 rounded-lg hover:bg-white/5 border border-white/10"
+        className={`flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-xl border transition-all ${
+          slackOn || driveOn
+            ? 'bg-indigo-600/20 border-indigo-500/50 text-indigo-300 hover:bg-indigo-600/30'
+            : 'bg-white/8 border-white/20 text-slate-300 hover:bg-white/12 hover:text-white hover:border-white/30'
+        }`}
       >
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M4 7h16M4 12h16M4 17h7" />
         </svg>
         Context
-        {(slackOn || driveOn) && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />}
+        {(slackOn || driveOn) && <span className="w-2 h-2 rounded-full bg-emerald-400" />}
       </button>
       {panel}
     </>
