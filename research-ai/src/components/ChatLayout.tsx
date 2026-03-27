@@ -1,6 +1,7 @@
 import { useAuth0 } from '@auth0/auth0-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useRef, useEffect, type FormEvent } from 'react'
+import ContextPanel from './ContextPanel'
 
 export type ChatMode = 'research' | 'product'
 
@@ -105,14 +106,17 @@ export default function ChatLayout({ mode }: ChatLayoutProps) {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const chatAreaRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Scroll chat area to bottom — never touches the page scroll
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (messages.length === 0) return
+    const el = chatAreaRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [messages, streaming])
 
-  const sendMessage = async (text: string) => {
+  const sendMessage = async (text: string, useContext = false, sources: string[] = [], channelIds: string[] = [], folderIds: string[] = []) => {
     if (!text.trim() || streaming) return
     const userMsg: Message = { role: 'user', content: text.trim() }
     const next = [...messages, userMsg]
@@ -120,14 +124,13 @@ export default function ChatLayout({ mode }: ChatLayoutProps) {
     setInput('')
     setStreaming(true)
 
-    // Add empty assistant message to stream into
     setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: next, mode }),
+        body: JSON.stringify({ messages: next, mode, useContext, sources, channelIds, folderIds }),
       })
 
       if (!res.ok) throw new Error(`Server error ${res.status}`)
@@ -192,15 +195,15 @@ export default function ChatLayout({ mode }: ChatLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
+    <div className="h-screen bg-slate-950 flex flex-col relative">
       {/* Background orbs */}
       <div className="absolute inset-0 pointer-events-none">
         <div className={`absolute top-[-20%] left-[-10%] w-[500px] h-[500px] rounded-full ${config.orb1} blur-[120px]`} />
         <div className={`absolute bottom-[-20%] right-[-10%] w-[400px] h-[400px] rounded-full ${config.orb2} blur-[120px]`} />
       </div>
 
-      {/* Nav */}
-      <nav className="relative z-10 flex items-center justify-between px-6 py-4 border-b border-white/5 shrink-0">
+      {/* Nav — always visible at top */}
+      <nav className="relative z-10 flex items-center justify-between px-6 py-4 border-b border-white/5 flex-none overflow-visible">
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/select')}
@@ -223,6 +226,22 @@ export default function ChatLayout({ mode }: ChatLayoutProps) {
         </div>
 
         <div className="flex items-center gap-3">
+          <ContextPanel
+            mode={mode}
+            accentBtn={config.sendBtn}
+            onSuggest={(idea, sources, channelIds, folderIds) => {
+              const parts = []
+              if (sources.includes('slack')) parts.push('Slack discussions')
+              if (sources.includes('drive')) parts.push('Google Drive documents')
+              const sourceLabel = parts.join(' and ')
+              const prompt = idea
+                ? `${idea} — use my ${sourceLabel} as context.`
+                : mode === 'research'
+                ? `Suggest 3 novel research directions based on my ${sourceLabel}.`
+                : `Suggest 3 product ideas based on recurring themes in my ${sourceLabel}.`
+              sendMessage(prompt, true, sources, channelIds, folderIds)
+            }}
+          />
           {user?.picture ? (
             <img src={user.picture} alt={user.name ?? 'User'} className="w-7 h-7 rounded-full ring-1 ring-white/10" />
           ) : (
@@ -239,8 +258,8 @@ export default function ChatLayout({ mode }: ChatLayoutProps) {
         </div>
       </nav>
 
-      {/* Chat area */}
-      <div className="relative z-10 flex-1 overflow-y-auto px-4 py-6">
+      {/* Chat area — this is the ONLY thing that scrolls */}
+      <div ref={chatAreaRef} className="relative z-10 flex-1 min-h-0 overflow-y-auto px-4 py-6">
         <div className="max-w-3xl mx-auto space-y-5">
           {messages.length === 0 && (
             <div className="flex flex-col items-center text-center pt-12 pb-6">
@@ -283,7 +302,7 @@ export default function ChatLayout({ mode }: ChatLayoutProps) {
             </div>
           )}
 
-          <div ref={bottomRef} />
+          <div />
         </div>
       </div>
 
