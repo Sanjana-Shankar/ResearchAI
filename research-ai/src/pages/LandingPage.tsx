@@ -30,7 +30,7 @@ export default function LandingPage() {
         </h1>
 
         <p className="text-slate-400 text-lg max-w-xl mb-10 leading-relaxed">
-          ResearchAI is your autonomous agent for deep academic research and product development — powered by your Slack and Drive context.
+          ResearchAI turns vague ideas into structured execution plans. It performs deep academic and market research tailored to your role, synthesizes literature and insights, and outputs research proposals and product roadmaps — on your timeline.
         </p>
 
         <button
